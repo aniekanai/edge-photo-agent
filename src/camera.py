@@ -30,5 +30,4 @@ while True:
     # Close all OpenCV windows
     cv2.destroyAllWindows()
 
-    #Close all OpenCV windows
-    cv2.destroyAllWindows()
+    

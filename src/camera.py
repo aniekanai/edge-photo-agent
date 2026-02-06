@@ -24,10 +24,10 @@ while True:
     if cv2.waitKey(1) & 0xFF == ord('q'):
         break
 
-    # Release the camera resource
-    cap.release()
+# Release the camera resource
+cap.release()
 
-    # Close all OpenCV windows
-    cv2.destroyAllWindows()
+# Close all OpenCV windows
+cv2.destroyAllWindows()
 
     

@@ -1,33 +1,103 @@
-import cv2 #OpenCV library for computer vision
+import cv2
+from metrics import (
+    compute_brightness,
+    compute_sharpness,
+    interpret_brightness,
+    interpret_sharpness,
+    compute_quality_score
+)
 
-#Open the default camera (index 0 = first USB Camera)
-cap = cv2.VideoCapture(0)
+def run_camera():
+    """
+    Main camera loop for the Edge Photo Intelligence Agent.
 
-# Check if camera opened successfully
-if not cap.isOpened():
-    print("Camera not opened")
-    exit()
+    Captures live frames from the Jetson Nano camera,
+    computes visual quality metrics, overlays results,
+    and displays real-time feedback.
+    """
+    cap = cv2.VideoCapture(0)
 
-while True:
-    #Read one frame from the camera
-    ret, frame = cap.read()
+    # Ensure camera opens correctly
+    if not cap.isOpened():
+        print("Camera not opened")
+        return
 
-    # If frame not read correctly, stop
-    if not ret:
-        print("Failed to grab frame")
-        break
+    while True:
+        # Capture a single frame
+        ret, frame = cap.read()
+        if not ret:
+            print("Failed to grab frame")
+            break
 
-    # Display the frame in a window (requires local display)
-    cv2.imshow("Jetson Nano Camera Test", frame)
+        # --- Compute visual metrics ---
+        brightness = compute_brightness(frame)
+        sharpness = compute_sharpness(frame)
 
-    #Wait 1 ms, exit loop if ESC key is pressed
-    if cv2.waitKey(1) & 0xFF == ord('q'):
-        break
+        brightness_label = interpret_brightness(brightness)
+        sharpness_label = interpret_sharpness(sharpness)
 
-# Release the camera resource
-cap.release()
+        score = compute_quality_score(brightness, sharpness)
 
-# Close all OpenCV windows
-cv2.destroyAllWindows()
+        # --- Overlay numeric metrics ---
+        cv2.putText(
+            frame,
+            "Brightness: {:.1f}".format(brightness),
+            (10, 30),
+            cv2.FONT_HERSHEY_SIMPLEX,
+            0.6,
+            (0, 255, 0),
+            2
+        )
 
-    
+        cv2.putText(
+            frame,
+            "Sharpness: {:.1f}".format(sharpness),
+            (10, 60),
+            cv2.FONT_HERSHEY_SIMPLEX,
+            0.6,
+            (0, 255, 0),
+            2
+        )
+
+        # --- Overlay interpreted feedback ---
+        cv2.putText(
+            frame,
+            "Brightness Status: {}".format(brightness_label),
+            (10, 90),
+            cv2.FONT_HERSHEY_SIMPLEX,
+            0.6,
+            (255, 255, 0),
+            2
+        )
+
+        cv2.putText(
+            frame,
+            "Sharpness Status: {}".format(sharpness_label),
+            (10, 120),
+            cv2.FONT_HERSHEY_SIMPLEX,
+            0.6,
+            (255, 255, 0),
+            2
+        )
+
+        # --- Overlay quality score ---
+        cv2.putText(
+            frame,
+            "Quality Score: {}/100".format(score),
+            (10, 160),
+            cv2.FONT_HERSHEY_SIMPLEX,
+            0.8,
+            (0, 0, 255),
+            2
+        )
+
+        # Display the annotated camera feed
+        cv2.imshow("Edge Photo Intelligence Agent", frame)
+
+        # Exit when 'q' is pressed
+        if cv2.waitKey(1) & 0xFF == ord('q'):
+            break
+
+    # Clean up resources
+    cap.release()
+    cv2.destroyAllWindows()

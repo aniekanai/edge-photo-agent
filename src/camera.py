@@ -4,7 +4,9 @@ from metrics import (
     compute_sharpness,
     interpret_brightness,
     interpret_sharpness,
-    compute_quality_score
+    compute_quality_score,
+    detect_faces,
+    is_face_centered
 )
 
 def run_camera():
@@ -21,10 +23,16 @@ def run_camera():
     if not cap.isOpened():
         print("Camera not opened")
         return
+    face_cascade = cv2.CascadeClassifier(
+    "haarcascade_frontalface_default.xml"
+    )
+
 
     while True:
         # Capture a single frame
         ret, frame = cap.read()
+        faces = detect_faces(frame, face_cascade)
+
         if not ret:
             print("Failed to grab frame")
             break
@@ -37,6 +45,19 @@ def run_camera():
         sharpness_label = interpret_sharpness(sharpness)
 
         score = compute_quality_score(brightness, sharpness)
+
+        face_status = "No Face Detected"
+
+    if len(faces) > 0:
+        face = faces[0]  # use first detected face
+        x, y, w, h = face
+
+        # Draw bounding box
+        cv2.rectangle(frame, (x, y), (x + w, y + h), (255, 0, 0), 2)
+
+        centered = is_face_centered(face, frame.shape[1])
+        face_status = "Centered" if centered else "Not Centered"
+
 
         # --- Overlay numeric metrics ---
         cv2.putText(
@@ -90,13 +111,24 @@ def run_camera():
             (0, 0, 255),
             2
         )
+        # --- Overlay face status ---
+        cv2.putText(
+            frame,
+            "Face Status: {}".format(face_status),
+            (10, 200),
+            cv2.FONT_HERSHEY_SIMPLEX,
+            0.7,
+            (0, 255, 255),
+            2
+        )
+
 
         # Display the annotated camera feed
         cv2.imshow("Edge Photo Intelligence Agent", frame)
 
         # Exit when 'q' is pressed
         if cv2.waitKey(1) & 0xFF == ord('q'):
-            break
+            return
 
     # Clean up resources
     cap.release()

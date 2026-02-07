@@ -56,3 +56,28 @@ def compute_quality_score(brightness, sharpness):
         score += 50
 
     return score
+def detect_faces(frame, face_cascade):
+    """
+    Detect faces in a frame using a Haar cascade.
+    Returns a list of bounding boxes.
+    """
+    gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+    faces = face_cascade.detectMultiScale(
+        gray,
+        scaleFactor=1.3,
+        minNeighbors=5
+    )
+    return faces
+
+
+def is_face_centered(face, frame_width, tolerance=0.15):
+    """
+    Check whether a detected face is roughly centered
+    within the frame width.
+    """
+    x, y, w, h = face
+    face_center_x = x + w / 2
+    frame_center_x = frame_width / 2
+
+    offset = abs(face_center_x - frame_center_x) / frame_center_x
+    return offset < tolerance

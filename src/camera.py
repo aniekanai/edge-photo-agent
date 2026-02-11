@@ -1,7 +1,5 @@
 import cv2
-import os
-from datetime import datetime
-
+import time
 from metrics import (
     compute_brightness,
     compute_sharpness,
@@ -11,32 +9,32 @@ from metrics import (
     detect_faces,
     is_face_centered
 )
+from agent import nemotron_guidance
 
 def run_camera():
-    # --- Setup camera ---
+
     cap = cv2.VideoCapture(0)
+
     if not cap.isOpened():
         print("Camera not opened")
         return
 
-    # --- Load face detector ---
     face_cascade = cv2.CascadeClassifier(
         "haarcascade_frontalface_default.xml"
     )
 
-    # --- Setup capture output directory ---
-    output_dir = os.path.join("..", "demo", "captures")
-    os.makedirs(output_dir, exist_ok=True)
-
-    print(f"[INFO] Captured images will be saved to: {output_dir}")
+    last_capture_time = 0
+    capture_cooldown = 3  # seconds between captures
 
     while True:
+
         ret, frame = cap.read()
         if not ret:
             print("Failed to grab frame")
             break
 
-        # --- Compute metrics ---
+        faces = detect_faces(frame, face_cascade)
+
         brightness = compute_brightness(frame)
         sharpness = compute_sharpness(frame)
 
@@ -45,77 +43,72 @@ def run_camera():
 
         score = compute_quality_score(brightness, sharpness)
 
-        # --- Face detection ---
-        faces = detect_faces(frame, face_cascade)
-        face_status = "No Face Detected"
+        face_detected = len(faces) > 0
         face_centered = False
 
-        if len(faces) > 0:
-            face = faces[0]
-            x, y, w, h = face
+        face_status = "No Face Detected"
 
-            cv2.rectangle(
-                frame,
-                (x, y),
-                (x + w, y + h),
-                (255, 0, 0),
-                2
-            )
+        if face_detected:
+            x, y, w, h = faces[0]
+            cv2.rectangle(frame, (x, y), (x + w, y + h), (255, 0, 0), 2)
 
-            face_centered = is_face_centered(face, frame.shape[1])
+            face_centered = is_face_centered(faces[0], frame.shape[1])
             face_status = "Centered" if face_centered else "Not Centered"
 
-        # --- Photo readiness logic ---
         photo_ready = (
-            score >= 85 and
+            face_detected and
             face_centered and
-            brightness_label == "OK" and
-            sharpness_label == "Sharp"
+            80 <= brightness <= 180 and
+            sharpness > 150
         )
 
-        # --- Status text ---
-        status_text = "Adjusting..."
-        status_color = (0, 0, 255)
+        # ===============================
+        # AUTO CAPTURE
+        # ===============================
 
-        if photo_ready:
-            status_text = "PHOTO READY"
-            status_color = (0, 255, 0)
+        current_time = time.time()
 
-        # --- Overlays ---
-        cv2.putText(frame, f"Brightness: {brightness:.1f}",
-                    (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0,255,0), 2)
+        if photo_ready and (current_time - last_capture_time > capture_cooldown):
+            filename = f"captures/captured_{int(current_time)}.jpg"
+            cv2.imwrite(filename, frame)
+            print(f"Captured: {filename}")
+            last_capture_time = current_time
 
-        cv2.putText(frame, f"Sharpness: {sharpness:.1f}",
-                    (10, 60), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0,255,0), 2)
+        # ===============================
+        # NEMOTRON GUIDANCE
+        # ===============================
 
-        cv2.putText(frame, f"Brightness Status: {brightness_label}",
-                    (10, 90), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255,255,0), 2)
+        metrics = {
+            "brightness": brightness,
+            "sharpness": sharpness,
+            "face_detected": face_detected,
+            "face_centered": face_centered,
+            "quality_score": score
+        }
 
-        cv2.putText(frame, f"Sharpness Status: {sharpness_label}",
-                    (10, 120), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255,255,0), 2)
+        guidance_text = nemotron_guidance(frame, metrics)
 
-        cv2.putText(frame, f"Quality Score: {score}/100",
-                    (10, 160), cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0,0,255), 2)
+        # ===============================
+        # OVERLAYS
+        # ===============================
 
-        cv2.putText(frame, f"Face Status: {face_status}",
-                    (10, 200), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0,255,255), 2)
+        cv2.putText(frame, f"Brightness: {brightness_label}", (10, 30),
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 255, 0), 2)
 
-        cv2.putText(frame, status_text,
-                    (10, 240), cv2.FONT_HERSHEY_SIMPLEX, 0.9, status_color, 3)
+        cv2.putText(frame, f"Sharpness: {sharpness_label}", (10, 60),
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 255, 0), 2)
+
+        cv2.putText(frame, f"Face: {face_status}", (10, 90),
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 0), 2)
+
+        cv2.putText(frame, f"Score: {score}/100", (10, 120),
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 0, 255), 2)
+
+        cv2.putText(frame, f"Guidance: {guidance_text}", (10, 160),
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 255, 255), 2)
 
         cv2.imshow("Edge Photo Intelligence Agent", frame)
 
-        # --- Auto-capture ---
-        if photo_ready:
-            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-            filename = f"captured_{timestamp}.jpg"
-            filepath = os.path.join(output_dir, filename)
-
-            cv2.imwrite(filepath, frame)
-            print(f"[CAPTURED] {filepath}")
-            break
-
-        # Manual exit
         if cv2.waitKey(1) & 0xFF == ord('q'):
             break
 

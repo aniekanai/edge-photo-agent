@@ -100,3 +100,4 @@ Perfect - capturing
 
     except Exception:
         return fallback_guidance(metrics)
+        

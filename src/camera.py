@@ -20,16 +20,16 @@ def run_camera():
         return
 
     cv2.namedWindow("Edge Photo Agent", cv2.WINDOW_NORMAL)
-    cv2.resizeWindow("Edge Photo Agent", 1000, 700)
+    cv2.resizeWindow("Edge Photo Agent", 1100, 750)
 
     face_cascade = cv2.CascadeClassifier("haarcascade_frontalface_default.xml")
 
     captures_dir = os.path.join(os.path.dirname(__file__), "captures")
     os.makedirs(captures_dir, exist_ok=True)
 
-    last_guidance = "Initializing..."
+    last_guidance = "Center your face"
     last_nemotron_time = 0
-    nemotron_interval = 3
+    nemotron_interval = 2.5
 
     capture_sequence = False
     sequence_start = 0
@@ -62,8 +62,8 @@ def run_camera():
 
         now = time.time()
 
-        # Nemotron guidance (throttled)
-        if (now - last_nemotron_time > nemotron_interval) and not capture_sequence:
+        # 🔹 Always generate guidance when not in capture sequence
+        if not capture_sequence and (now - last_nemotron_time > nemotron_interval):
             metrics = {
                 "brightness": brightness,
                 "sharpness": sharpness,
@@ -75,15 +75,17 @@ def run_camera():
             last_guidance = nemotron_guidance(frame, metrics)
             last_nemotron_time = now
 
-        # Capture sequence logic
+        # 🔹 Capture sequence
         if photo_ready and not capture_sequence:
             capture_sequence = True
             sequence_start = now
 
         if capture_sequence:
-            if now - sequence_start < 1:
+            elapsed = now - sequence_start
+
+            if elapsed < 1:
                 last_guidance = "Look at camera"
-            elif now - sequence_start < 2:
+            elif elapsed < 2:
                 last_guidance = "Smile"
             else:
                 filename = os.path.join(
@@ -94,19 +96,31 @@ def run_camera():
                 print(f"[CAPTURED] {filename}")
                 capture_sequence = False
 
-        # Minimal clean overlay
+        # 🔹 Clean UI
+
         status_text = "Ready" if photo_ready else "Adjusting"
         status_color = (0, 255, 0) if photo_ready else (0, 0, 255)
 
-        cv2.putText(frame, status_text,
-                    (20, 50),
+        cv2.putText(frame,
+                    status_text,
+                    (30, 60),
                     cv2.FONT_HERSHEY_SIMPLEX,
                     1,
                     status_color,
                     3)
 
-        cv2.putText(frame, last_guidance,
-                    (50, 650),
+        # Big centered guidance text
+        text_size = cv2.getTextSize(last_guidance,
+                                     cv2.FONT_HERSHEY_SIMPLEX,
+                                     1.2,
+                                     3)[0]
+
+        text_x = (frame.shape[1] - text_size[0]) // 2
+        text_y = frame.shape[0] - 60
+
+        cv2.putText(frame,
+                    last_guidance,
+                    (text_x, text_y),
                     cv2.FONT_HERSHEY_SIMPLEX,
                     1.2,
                     (0, 255, 255),
@@ -119,3 +133,4 @@ def run_camera():
 
     cap.release()
     cv2.destroyAllWindows()
+    

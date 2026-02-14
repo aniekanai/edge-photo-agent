@@ -15,7 +15,7 @@ def run_camera():
 
     cap = cv2.VideoCapture(0)
 
-    # Moderate resolution for smooth performance
+    # Moderate resolution (no extra optimization)
     cap.set(cv2.CAP_PROP_FRAME_WIDTH, 960)
     cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 540)
 
@@ -35,10 +35,15 @@ def run_camera():
 
     print("AI Photography Co-Pilot Running...")
 
-    # Nemotron timing control (prevents freezing)
+    # Nemotron throttling
     last_nemotron_time = 0
-    nemotron_interval = 2.0  # seconds
+    nemotron_interval = 2.0
     cached_refinement = ""
+
+    # Face detection throttling
+    frame_count = 0
+    face_detected = False
+    face_centered = False
 
     optimal = False
     nemotron_status = ""
@@ -49,23 +54,26 @@ def run_camera():
             print("Failed to grab frame")
             break
 
-        # Save clean frame BEFORE drawing overlay
         raw_frame = frame.copy()
 
-        # ----------------------------
-        # Compute CV Metrics
-        # ----------------------------
         brightness = compute_brightness(frame)
         sharpness = compute_sharpness(frame)
 
-        faces = detect_faces(frame, face_cascade)
-        face_detected = len(faces) > 0
+        # --------------------------------
+        # Face detection every 5 frames
+        # --------------------------------
+        frame_count += 1
 
-        face_centered = False
-        if face_detected:
-            face_centered = is_face_centered(
-                faces[0], frame.shape[1]
-            )
+        if frame_count % 5 == 0:
+            faces = detect_faces(frame, face_cascade)
+            face_detected = len(faces) > 0
+
+            if face_detected:
+                face_centered = is_face_centered(
+                    faces[0], frame.shape[1]
+                )
+            else:
+                face_centered = False
 
         metrics = {
             "brightness": brightness,
@@ -74,14 +82,14 @@ def run_camera():
             "face_centered": face_centered,
         }
 
-        # ----------------------------
-        # Fast Local CV Guidance
-        # ----------------------------
+        # --------------------------------
+        # Local Guidance (fast)
+        # --------------------------------
         primary_instruction = local_guidance(metrics)
 
-        # ----------------------------
-        # Nemotron (non-blocking behavior)
-        # ----------------------------
+        # --------------------------------
+        # Nemotron Refinement (throttled)
+        # --------------------------------
         if primary_instruction == "READY":
             current_time = time.time()
 
@@ -96,9 +104,9 @@ def run_camera():
             nemotron_status = ""
             refinement = ""
 
-        # ----------------------------
-        # Final Instruction Logic
-        # ----------------------------
+        # --------------------------------
+        # Final Instruction
+        # --------------------------------
         if primary_instruction != "READY":
             final_instruction = primary_instruction
             optimal = False
@@ -112,9 +120,9 @@ def run_camera():
 
         font = cv2.FONT_HERSHEY_SIMPLEX
 
-        # ----------------------------
-        # TOP LEFT STATUS
-        # ----------------------------
+        # --------------------------------
+        # Top Left Status
+        # --------------------------------
         if optimal:
             cv2.putText(
                 frame,
@@ -147,9 +155,9 @@ def run_camera():
                 2,
             )
 
-        # ----------------------------
-        # BOTTOM CENTER INSTRUCTION
-        # ----------------------------
+        # --------------------------------
+        # Bottom Instruction
+        # --------------------------------
         if optimal:
             instruction_text = "Press SPACE when ready"
         else:
@@ -179,7 +187,7 @@ def run_camera():
         if key == ord("q"):
             break
 
-        # Manual capture (clean image)
+        # Manual Capture (clean frame)
         if key == 32 and optimal:
             timestamp = time.strftime("%Y%m%d_%H%M%S")
             filename = f"capture_{timestamp}.jpg"

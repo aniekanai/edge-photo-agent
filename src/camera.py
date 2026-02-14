@@ -15,7 +15,7 @@ from agent import nemotron_refinement
 
 def local_guidance(face_detected, face_centered, brightness, sharpness):
     """
-    Instant CV-based guidance for photographer.
+    Instant CV-based guidance for photographers.
     """
     if not face_detected:
         return "No subject detected"
@@ -29,7 +29,7 @@ def local_guidance(face_detected, face_centered, brightness, sharpness):
     if brightness > 180:
         return "Lighting too strong"
 
-    if sharpness < 400:  # your updated threshold
+    if sharpness <= 350:  # your tuned threshold
         return "Image unstable"
 
     return "Optimal Composition"
@@ -37,13 +37,13 @@ def local_guidance(face_detected, face_centered, brightness, sharpness):
 
 def draw_multiline_text(frame, text, y_start):
     """
-    Draw centered multi-line wrapped text so nothing gets cut off.
+    Draw centered, wrapped multi-line text so instructions never clip.
     """
     words = text.split(" ")
     lines = []
     current_line = ""
 
-    max_width = frame.shape[1] - 100  # padding from edges
+    max_width = frame.shape[1] - 120  # padding
 
     for word in words:
         test_line = current_line + " " + word if current_line else word
@@ -91,13 +91,21 @@ def run_camera():
         print("Camera not opened")
         return
 
-    # 🔥 TRUE FULLSCREEN MODE
-    cv2.namedWindow("AI Photography Co-Pilot", cv2.WINDOW_NORMAL)
+    # Try to increase camera resolution if supported
+    cap.set(cv2.CAP_PROP_FRAME_WIDTH, 1280)
+    cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 720)
+
+    # FULLSCREEN WINDOW
+    window_name = "AI Photography Co-Pilot"
+    cv2.namedWindow(window_name, cv2.WINDOW_NORMAL)
     cv2.setWindowProperty(
-        "AI Photography Co-Pilot",
+        window_name,
         cv2.WND_PROP_FULLSCREEN,
         cv2.WINDOW_FULLSCREEN
     )
+
+    # Grab screen size AFTER window is created
+    screen_x, screen_y, screen_width, screen_height = cv2.getWindowImageRect(window_name)
 
     face_cascade = cv2.CascadeClassifier("haarcascade_frontalface_default.xml")
 
@@ -108,7 +116,7 @@ def run_camera():
     refinement_lock = threading.Lock()
     worker_running = False
     last_worker_start = 0
-    nemotron_interval = 4.0  # seconds between Nemotron calls
+    nemotron_interval = 4.0  # seconds
 
     def worker(frame_copy, metrics_copy):
         nonlocal refinement_text, worker_running
@@ -147,7 +155,7 @@ def run_camera():
 
         now = time.time()
 
-        # Run Nemotron in background
+        # Background Nemotron refinement (non-blocking)
         if (
             face_detected
             and (now - last_worker_start > nemotron_interval)
@@ -170,19 +178,15 @@ def run_camera():
             )
             t.start()
 
-        # Merge refinement
         with refinement_lock:
             refine = refinement_text
 
-        if refine:
-            final_guidance = f"{guidance} | {refine}"
-        else:
-            final_guidance = guidance
+        final_guidance = f"{guidance} | {refine}" if refine else guidance
 
-        # Status indicator
+        #  Status indicator
         status_color = (0, 255, 0) if photo_ready else (0, 0, 255)
         status_text = (
-            "Optimal Composition - Press SPACE"
+            "Optimal Composition – Press SPACE"
             if photo_ready
             else "Adjusting"
         )
@@ -197,11 +201,11 @@ def run_camera():
             3
         )
 
-        # 🔥 Wrapped guidance text (bottom center)
+        # 🔹 Wrapped guidance at bottom
         draw_multiline_text(
             frame,
             final_guidance,
-            frame.shape[0] - 120
+            frame.shape[0] - 140
         )
 
         if worker_running:
@@ -215,7 +219,10 @@ def run_camera():
                 2
             )
 
-        cv2.imshow("AI Photography Co-Pilot", frame)
+        #  SCALE FRAME TO FULLSCREEN
+        frame = cv2.resize(frame, (screen_width, screen_height))
+
+        cv2.imshow(window_name, frame)
 
         key = cv2.waitKey(1) & 0xFF
 

@@ -31,7 +31,7 @@ def local_guidance(face_detected, face_centered, brightness, sharpness):
     if brightness > 180:
         return "Lighting too strong"
 
-    if sharpness < 500:
+    if sharpness < 400:
         return "Image unstable"
 
     return "Optimal Composition"

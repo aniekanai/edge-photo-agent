@@ -3,39 +3,47 @@ import base64
 import cv2
 import os
 
-# NVIDIA Nemotron API Configuration
 NEMOTRON_API_URL = "https://integrate.api.nvidia.com/v1/chat/completions"
 NEMOTRON_MODEL = "nvidia/nemotron-nano-12b-v2-vl"
 API_KEY_ENV = "NVIDIA_API_KEY"
-API_TIMEOUT_SECONDS = 5.0  # Increased for stability
+API_TIMEOUT_SECONDS = 5.0
 
 
 def encode_frame_to_base64(frame):
-    """
-    Encode OpenCV frame to base64 for API transmission.
-    """
     _, buffer = cv2.imencode(".jpg", frame)
     return base64.b64encode(buffer).decode("utf-8")
+
+
+def local_guidance(metrics):
+    """
+    Fast local CV-based guidance (Primary brain).
+    No API calls here.
+    """
+
+    if not metrics["face_detected"]:
+        return "Center Yourself"
+
+    if not metrics["face_centered"]:
+        return "Move to Center"
+
+    if metrics["brightness"] < 80:
+        return "Increase Lighting"
+
+    if metrics["sharpness"] <= 350:
+        return "Hold Still"
+
+    return "READY"
 
 
 def nemotron_refinement(frame, metrics):
     """
     Professional photography refinement layer.
-
-    This function does NOT handle basic brightness/centering/sharpness.
-    Local CV handles those instantly.
-
-    Nemotron focuses on higher-level semantic composition issues:
-    - Pose orientation
-    - Occlusion
-    - Camera height
-    - Background distractions
-    - Subject gaze direction
+    Only runs when local CV says READY.
     """
 
     api_key = os.getenv(API_KEY_ENV)
     if not api_key:
-        return ""  # Safe fallback if key missing
+        return ""
 
     image_b64 = encode_frame_to_base64(frame)
 
@@ -48,25 +56,22 @@ def nemotron_refinement(frame, metrics):
     user_prompt = """
 You are assisting a professional photographer.
 
-Analyze the image and detect higher-level composition issues that CV metrics may miss:
+Analyze the image and detect higher-level composition issues:
 
 - Subject turned too far sideways
-- Face partially occluded (hands, objects, mask)
+- Face partially occluded
 - Distracting object in foreground
 - Camera angle too low or too high
-- Poor head positioning
-- Background distraction
 - Subject looking away from camera
-- Framing imbalance
+- Background distraction
 
-Return ONE short instruction (max 5 words) directed to the photographer.
+Return ONE short instruction (max 5 words).
 
 Examples:
 Ask subject to turn slightly
 Remove foreground object
 Raise camera angle
 Lower camera slightly
-Reduce background distraction
 Ask subject to face forward
 OK
 """
@@ -109,11 +114,9 @@ OK
 
         text = result["choices"][0]["message"]["content"].strip()
 
-        # Only return meaningful refinement
         if text.upper() == "OK":
             return ""
         return text
 
     except Exception:
-        # Silent fallback for smooth UX
         return ""

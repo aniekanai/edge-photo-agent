@@ -8,7 +8,7 @@ from metrics import (
     detect_faces,
     is_face_centered,
 )
-from agent import  nemotron_refinement
+from agent import local_guidance, nemotron_refinement
 
 
 def run_camera():

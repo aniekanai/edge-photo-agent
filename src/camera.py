@@ -1,241 +1,184 @@
 import cv2
-import time
 import os
-import threading
-
+import time
+import subprocess
 from metrics import (
     compute_brightness,
     compute_sharpness,
     detect_faces,
-    is_face_centered
+    is_face_centered,
 )
-
-from agent import nemotron_refinement
-
-
-def local_guidance(face_detected, face_centered, brightness, sharpness):
-    """
-    Instant CV-based guidance for photographers.
-    """
-    if not face_detected:
-        return "No subject detected"
-
-    if not face_centered:
-        return "Subject not centered"
-
-    if brightness < 90:
-        return "Lighting too low"
-
-    if brightness > 180:
-        return "Lighting too strong"
-
-    if sharpness <= 350:  # your tuned threshold
-        return "Image unstable"
-
-    return "Optimal Composition"
-
-
-def draw_multiline_text(frame, text, y_start):
-    """
-    Draw centered, wrapped multi-line text so instructions never clip.
-    """
-    words = text.split(" ")
-    lines = []
-    current_line = ""
-
-    max_width = frame.shape[1] - 120  # padding
-
-    for word in words:
-        test_line = current_line + " " + word if current_line else word
-        text_size = cv2.getTextSize(
-            test_line,
-            cv2.FONT_HERSHEY_SIMPLEX,
-            1.0,
-            2
-        )[0]
-
-        if text_size[0] > max_width:
-            lines.append(current_line)
-            current_line = word
-        else:
-            current_line = test_line
-
-    if current_line:
-        lines.append(current_line)
-
-    y = y_start
-    for line in lines:
-        text_size = cv2.getTextSize(
-            line,
-            cv2.FONT_HERSHEY_SIMPLEX,
-            1.0,
-            2
-        )[0]
-        x = (frame.shape[1] - text_size[0]) // 2
-
-        cv2.putText(
-            frame,
-            line,
-            (x, y),
-            cv2.FONT_HERSHEY_SIMPLEX,
-            1.0,
-            (0, 255, 255),
-            2
-        )
-        y += 45
+from agent import local_guidance, nemotron_refinement
 
 
 def run_camera():
+    window_name = "AI Photography Co-Pilot"
+
     cap = cv2.VideoCapture(0)
+
+    # Set camera resolution (if supported)
+    cap.set(cv2.CAP_PROP_FRAME_WIDTH, 1280)
+    cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 720)
+
     if not cap.isOpened():
         print("Camera not opened")
         return
 
-    # Try to increase camera resolution if supported
-    cap.set(cv2.CAP_PROP_FRAME_WIDTH, 1280)
-    cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 720)
-
-    # FULLSCREEN WINDOW
-    window_name = "AI Photography Co-Pilot"
+    # Create fullscreen window
     cv2.namedWindow(window_name, cv2.WINDOW_NORMAL)
     cv2.setWindowProperty(
         window_name,
         cv2.WND_PROP_FULLSCREEN,
-        cv2.WINDOW_FULLSCREEN
+        cv2.WINDOW_FULLSCREEN,
     )
 
-    # Grab screen size AFTER window is created
-    screen_x, screen_y, screen_width, screen_height = cv2.getWindowImageRect(window_name)
+    # Get screen resolution safely (Jetson compatible)
+    try:
+        output = subprocess.check_output(
+            "xrandr | grep '*'", shell=True
+        ).decode()
+        resolution = output.split()[0]
+        screen_width, screen_height = map(int, resolution.split("x"))
+    except:
+        screen_width, screen_height = 1920, 1080
 
-    face_cascade = cv2.CascadeClassifier("haarcascade_frontalface_default.xml")
+    face_cascade = cv2.CascadeClassifier(
+        "haarcascade_frontalface_default.xml"
+    )
 
-    captures_dir = os.path.join(os.path.dirname(__file__), "captures")
-    os.makedirs(captures_dir, exist_ok=True)
+    last_capture_time = 0
+    capture_cooldown = 3  # seconds
 
-    refinement_text = ""
-    refinement_lock = threading.Lock()
-    worker_running = False
-    last_worker_start = 0
-    nemotron_interval = 4.0  # seconds
+    capture_dir = os.path.join("captures")
+    os.makedirs(capture_dir, exist_ok=True)
 
-    def worker(frame_copy, metrics_copy):
-        nonlocal refinement_text, worker_running
-        try:
-            result = nemotron_refinement(frame_copy, metrics_copy)
-            with refinement_lock:
-                refinement_text = result
-        finally:
-            worker_running = False
+    print("AI Photography Co-Pilot Running...")
 
     while True:
         ret, frame = cap.read()
         if not ret:
+            print("Failed to grab frame")
             break
 
-        raw_frame = frame.copy()
-
-        faces = detect_faces(frame, face_cascade)
-        face_detected = len(faces) > 0
-        face_centered = False
-
-        if face_detected:
-            face_centered = is_face_centered(faces[0], frame.shape[1])
-
+        # ----------------------------
+        # Compute CV Metrics
+        # ----------------------------
         brightness = compute_brightness(frame)
         sharpness = compute_sharpness(frame)
 
-        guidance = local_guidance(
-            face_detected,
-            face_centered,
-            brightness,
-            sharpness
-        )
+        faces = detect_faces(frame, face_cascade)
+        face_detected = len(faces) > 0
 
-        photo_ready = guidance == "Optimal Composition"
+        face_centered = False
 
-        now = time.time()
-
-        # Background Nemotron refinement (non-blocking)
-        if (
-            face_detected
-            and (now - last_worker_start > nemotron_interval)
-            and not worker_running
-        ):
-            worker_running = True
-            last_worker_start = now
-
-            metrics_copy = {
-                "brightness": brightness,
-                "sharpness": sharpness,
-                "face_detected": face_detected,
-                "face_centered": face_centered,
-            }
-
-            t = threading.Thread(
-                target=worker,
-                args=(raw_frame.copy(), metrics_copy),
-                daemon=True
+        if face_detected:
+            x, y, w, h = faces[0]
+            face_centered = is_face_centered(
+                faces[0], frame.shape[1]
             )
-            t.start()
+            cv2.rectangle(
+                frame,
+                (x, y),
+                (x + w, y + h),
+                (255, 0, 0),
+                2,
+            )
 
-        with refinement_lock:
-            refine = refinement_text
+        metrics = {
+            "brightness": brightness,
+            "sharpness": sharpness,
+            "face_detected": face_detected,
+            "face_centered": face_centered,
+        }
 
-        final_guidance = f"{guidance} | {refine}" if refine else guidance
+        # ----------------------------
+        # Local CV Guidance (FAST)
+        # ----------------------------
+        primary_instruction = local_guidance(metrics)
 
-        #  Status indicator
-        status_color = (0, 255, 0) if photo_ready else (0, 0, 255)
-        status_text = (
-            "Optimal Composition – Press SPACE"
-            if photo_ready
-            else "Adjusting"
+        # ----------------------------
+        # Nemotron Refinement (SMART)
+        # ----------------------------
+        refinement = ""
+
+        if primary_instruction == "READY":
+            refinement = nemotron_refinement(frame, metrics)
+
+        # ----------------------------
+        # Final Instruction Logic
+        # ----------------------------
+        if primary_instruction != "READY":
+            final_instruction = primary_instruction
+            status_color = (0, 165, 255)  # Orange
+        else:
+            if refinement:
+                final_instruction = refinement
+                status_color = (0, 165, 255)
+            else:
+                final_instruction = "READY - HOLD STILL"
+                status_color = (0, 255, 0)
+
+        # ----------------------------
+        # Auto Capture
+        # ----------------------------
+        current_time = time.time()
+
+        if (
+            primary_instruction == "READY"
+            and not refinement
+            and current_time - last_capture_time > capture_cooldown
+            and sharpness >= 400
+        ):
+            timestamp = time.strftime("%Y%m%d_%H%M%S")
+            filename = f"capture_{timestamp}.jpg"
+            filepath = os.path.join(capture_dir, filename)
+            cv2.imwrite(filepath, frame)
+            print(f"Captured: {filename}")
+            last_capture_time = current_time
+
+        # ----------------------------
+        # Resize to Fullscreen
+        # ----------------------------
+        frame = cv2.resize(frame, (screen_width, screen_height))
+
+        # ----------------------------
+        # Overlay UI
+        # ----------------------------
+        font = cv2.FONT_HERSHEY_SIMPLEX
+
+        # Status Top Left
+        cv2.putText(
+            frame,
+            "AI Photography Co-Pilot",
+            (50, 70),
+            font,
+            1.2,
+            (255, 255, 255),
+            3,
         )
+
+        # Main Instruction Center
+        text_size = cv2.getTextSize(
+            final_instruction, font, 1.2, 3
+        )[0]
+
+        text_x = (screen_width - text_size[0]) // 2
+        text_y = screen_height - 120
 
         cv2.putText(
             frame,
-            status_text,
-            (40, 70),
-            cv2.FONT_HERSHEY_SIMPLEX,
+            final_instruction,
+            (text_x, text_y),
+            font,
             1.2,
             status_color,
-            3
+            3,
         )
-
-        # 🔹 Wrapped guidance at bottom
-        draw_multiline_text(
-            frame,
-            final_guidance,
-            frame.shape[0] - 140
-        )
-
-        if worker_running:
-            cv2.putText(
-                frame,
-                "Nemotron analyzing...",
-                (40, 120),
-                cv2.FONT_HERSHEY_SIMPLEX,
-                0.8,
-                (255, 255, 0),
-                2
-            )
-
-        #  SCALE FRAME TO FULLSCREEN
-        frame = cv2.resize(frame, (screen_width, screen_height))
 
         cv2.imshow(window_name, frame)
 
-        key = cv2.waitKey(1) & 0xFF
-
-        if key == ord(" "):  # SPACE to capture
-            if photo_ready:
-                filename = os.path.join(
-                    captures_dir,
-                    f"captured_{int(time.time())}.jpg"
-                )
-                cv2.imwrite(filename, raw_frame)
-                print(f"[CAPTURED] {filename}")
-
-        if key == ord("q"):
+        # Exit
+        if cv2.waitKey(1) & 0xFF == ord("q"):
             break
 
     cap.release()

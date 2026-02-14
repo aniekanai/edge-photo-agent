@@ -100,4 +100,80 @@ Perfect - capturing
 
     except Exception:
         return fallback_guidance(metrics)
-        
+
+def nemotron_refinement(frame, metrics):
+    """
+    High-level refinement layer:
+    - detects occlusion (hands/objects/mask)
+    - suggests simple actions beyond CV thresholds
+    Returns ONE short instruction (max 5 words).
+    """
+    api_key = os.getenv(API_KEY_ENV)
+    if not api_key:
+        return ""  # no refinement if no key
+
+    image_b64 = encode_frame_to_base64(frame)
+
+    system_prompt = (
+        "You are a smart camera assistant. "
+        "Return only ONE short refinement instruction (max 5 words). "
+        "No explanations. If nothing is wrong, return 'OK'."
+    )
+
+    user_prompt = f"""
+We already compute brightness/sharpness/centering.
+Your job is to detect semantic problems from the image:
+- hand/finger occlusion
+- object blocking face
+- mask/face covered
+- extreme profile view
+- distracting obstruction in front of camera
+
+Return ONE short instruction (max 5 words).
+Examples:
+Remove object
+Uncover your face
+Clean the lens
+Lower the camera
+Step back slightly
+OK
+"""
+
+    payload = {
+        "model": NEMOTRON_MODEL,
+        "messages": [
+            {"role": "system", "content": system_prompt},
+            {
+                "role": "user",
+                "content": [
+                    {"type": "text", "text": user_prompt},
+                    {
+                        "type": "image_url",
+                        "image_url": {"url": f"data:image/jpeg;base64,{image_b64}"},
+                    },
+                ],
+            },
+        ],
+        "max_tokens": 20,
+        "temperature": 0.2,
+    }
+
+    headers = {
+        "Authorization": f"Bearer {api_key}",
+        "Content-Type": "application/json",
+    }
+
+    try:
+        response = requests.post(
+            NEMOTRON_API_URL,
+            headers=headers,
+            json=payload,
+            timeout=API_TIMEOUT_SECONDS,
+        )
+        response.raise_for_status()
+        result = response.json()
+        text = result["choices"][0]["message"]["content"].strip()
+        return "" if text.upper() == "OK" else text
+    except Exception:
+        return ""
+

@@ -35,8 +35,13 @@ def run_camera():
 
     print("AI Photography Co-Pilot Running...")
 
-    nemotron_status = ""
+    # Nemotron timing control (prevents freezing)
+    last_nemotron_time = 0
+    nemotron_interval = 2.0  # seconds
+    cached_refinement = ""
+
     optimal = False
+    nemotron_status = ""
 
     while True:
         ret, frame = cap.read()
@@ -44,6 +49,12 @@ def run_camera():
             print("Failed to grab frame")
             break
 
+        # Save clean frame BEFORE drawing overlay
+        raw_frame = frame.copy()
+
+        # ----------------------------
+        # Compute CV Metrics
+        # ----------------------------
         brightness = compute_brightness(frame)
         sharpness = compute_sharpness(frame)
 
@@ -63,17 +74,31 @@ def run_camera():
             "face_centered": face_centered,
         }
 
-        # Fast local guidance
+        # ----------------------------
+        # Fast Local CV Guidance
+        # ----------------------------
         primary_instruction = local_guidance(metrics)
 
-        refinement = ""
-
+        # ----------------------------
+        # Nemotron (non-blocking behavior)
+        # ----------------------------
         if primary_instruction == "READY":
-            nemotron_status = "Nemotron analyzing..."
-            refinement = nemotron_refinement(frame, metrics)
-        else:
-            nemotron_status = ""
+            current_time = time.time()
 
+            if current_time - last_nemotron_time > nemotron_interval:
+                nemotron_status = "Nemotron analyzing..."
+                cached_refinement = nemotron_refinement(frame, metrics)
+                last_nemotron_time = current_time
+
+            refinement = cached_refinement
+        else:
+            cached_refinement = ""
+            nemotron_status = ""
+            refinement = ""
+
+        # ----------------------------
+        # Final Instruction Logic
+        # ----------------------------
         if primary_instruction != "READY":
             final_instruction = primary_instruction
             optimal = False
@@ -87,10 +112,9 @@ def run_camera():
 
         font = cv2.FONT_HERSHEY_SIMPLEX
 
-        # --------------------------
+        # ----------------------------
         # TOP LEFT STATUS
-        # --------------------------
-
+        # ----------------------------
         if optimal:
             cv2.putText(
                 frame,
@@ -123,10 +147,9 @@ def run_camera():
                 2,
             )
 
-        # --------------------------
+        # ----------------------------
         # BOTTOM CENTER INSTRUCTION
-        # --------------------------
-
+        # ----------------------------
         if optimal:
             instruction_text = "Press SPACE when ready"
         else:
@@ -156,11 +179,12 @@ def run_camera():
         if key == ord("q"):
             break
 
-        if key == 32 and optimal:  # SPACE key
+        # Manual capture (clean image)
+        if key == 32 and optimal:
             timestamp = time.strftime("%Y%m%d_%H%M%S")
             filename = f"capture_{timestamp}.jpg"
             filepath = os.path.join(capture_dir, filename)
-            cv2.imwrite(filepath, frame)
+            cv2.imwrite(filepath, raw_frame)
             print(f"Captured: {filename}")
 
     cap.release()

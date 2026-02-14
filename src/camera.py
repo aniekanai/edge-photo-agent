@@ -6,7 +6,6 @@ import threading
 from metrics import (
     compute_brightness,
     compute_sharpness,
-    compute_quality_score,
     detect_faces,
     is_face_centered
 )
@@ -16,9 +15,8 @@ from agent import nemotron_refinement
 
 def local_guidance(face_detected, face_centered, brightness, sharpness):
     """
-    Instant CV-based guidance for photographers.
+    Instant CV-based guidance for photographer.
     """
-
     if not face_detected:
         return "No subject detected"
 
@@ -31,10 +29,60 @@ def local_guidance(face_detected, face_centered, brightness, sharpness):
     if brightness > 180:
         return "Lighting too strong"
 
-    if sharpness < 400:
+    if sharpness < 400:  # your updated threshold
         return "Image unstable"
 
     return "Optimal Composition"
+
+
+def draw_multiline_text(frame, text, y_start):
+    """
+    Draw centered multi-line wrapped text so nothing gets cut off.
+    """
+    words = text.split(" ")
+    lines = []
+    current_line = ""
+
+    max_width = frame.shape[1] - 100  # padding from edges
+
+    for word in words:
+        test_line = current_line + " " + word if current_line else word
+        text_size = cv2.getTextSize(
+            test_line,
+            cv2.FONT_HERSHEY_SIMPLEX,
+            1.0,
+            2
+        )[0]
+
+        if text_size[0] > max_width:
+            lines.append(current_line)
+            current_line = word
+        else:
+            current_line = test_line
+
+    if current_line:
+        lines.append(current_line)
+
+    y = y_start
+    for line in lines:
+        text_size = cv2.getTextSize(
+            line,
+            cv2.FONT_HERSHEY_SIMPLEX,
+            1.0,
+            2
+        )[0]
+        x = (frame.shape[1] - text_size[0]) // 2
+
+        cv2.putText(
+            frame,
+            line,
+            (x, y),
+            cv2.FONT_HERSHEY_SIMPLEX,
+            1.0,
+            (0, 255, 255),
+            2
+        )
+        y += 45
 
 
 def run_camera():
@@ -43,8 +91,13 @@ def run_camera():
         print("Camera not opened")
         return
 
+    # 🔥 TRUE FULLSCREEN MODE
     cv2.namedWindow("AI Photography Co-Pilot", cv2.WINDOW_NORMAL)
-    cv2.resizeWindow("AI Photography Co-Pilot", 1100, 750)
+    cv2.setWindowProperty(
+        "AI Photography Co-Pilot",
+        cv2.WND_PROP_FULLSCREEN,
+        cv2.WINDOW_FULLSCREEN
+    )
 
     face_cascade = cv2.CascadeClassifier("haarcascade_frontalface_default.xml")
 
@@ -55,7 +108,7 @@ def run_camera():
     refinement_lock = threading.Lock()
     worker_running = False
     last_worker_start = 0
-    nemotron_interval = 4.0
+    nemotron_interval = 4.0  # seconds between Nemotron calls
 
     def worker(frame_copy, metrics_copy):
         nonlocal refinement_text, worker_running
@@ -83,13 +136,18 @@ def run_camera():
         brightness = compute_brightness(frame)
         sharpness = compute_sharpness(frame)
 
-        guidance = local_guidance(face_detected, face_centered, brightness, sharpness)
+        guidance = local_guidance(
+            face_detected,
+            face_centered,
+            brightness,
+            sharpness
+        )
 
         photo_ready = guidance == "Optimal Composition"
 
         now = time.time()
 
-        # Run Nemotron in background occasionally
+        # Run Nemotron in background
         if (
             face_detected
             and (now - last_worker_start > nemotron_interval)
@@ -112,7 +170,7 @@ def run_camera():
             )
             t.start()
 
-        # Merge refinement if present
+        # Merge refinement
         with refinement_lock:
             refine = refinement_text
 
@@ -132,41 +190,27 @@ def run_camera():
         cv2.putText(
             frame,
             status_text,
-            (30, 60),
+            (40, 70),
             cv2.FONT_HERSHEY_SIMPLEX,
-            1.0,
+            1.2,
             status_color,
             3
         )
 
-        # Bottom centered guidance
-        text_size = cv2.getTextSize(
-            final_guidance,
-            cv2.FONT_HERSHEY_SIMPLEX,
-            1.0,
-            3
-        )[0]
-
-        text_x = max(20, (frame.shape[1] - text_size[0]) // 2)
-        text_y = frame.shape[0] - 50
-
-        cv2.putText(
+        # 🔥 Wrapped guidance text (bottom center)
+        draw_multiline_text(
             frame,
             final_guidance,
-            (text_x, text_y),
-            cv2.FONT_HERSHEY_SIMPLEX,
-            1.0,
-            (0, 255, 255),
-            3
+            frame.shape[0] - 120
         )
 
         if worker_running:
             cv2.putText(
                 frame,
                 "Nemotron analyzing...",
-                (30, 100),
+                (40, 120),
                 cv2.FONT_HERSHEY_SIMPLEX,
-                0.7,
+                0.8,
                 (255, 255, 0),
                 2
             )

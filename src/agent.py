@@ -3,62 +3,72 @@ import base64
 import cv2
 import os
 
+# NVIDIA Nemotron API Configuration
 NEMOTRON_API_URL = "https://integrate.api.nvidia.com/v1/chat/completions"
 NEMOTRON_MODEL = "nvidia/nemotron-nano-12b-v2-vl"
 API_KEY_ENV = "NVIDIA_API_KEY"
-API_TIMEOUT_SECONDS = 2.0
+API_TIMEOUT_SECONDS = 5.0  # Increased for stability
 
 
 def encode_frame_to_base64(frame):
+    """
+    Encode OpenCV frame to base64 for API transmission.
+    """
     _, buffer = cv2.imencode(".jpg", frame)
     return base64.b64encode(buffer).decode("utf-8")
 
 
-def fallback_guidance(metrics):
-    if not metrics["face_detected"]:
-        return "Center yourself"
+def nemotron_refinement(frame, metrics):
+    """
+    Professional photography refinement layer.
 
-    if not metrics["face_centered"]:
-        return "Move to center"
+    This function does NOT handle basic brightness/centering/sharpness.
+    Local CV handles those instantly.
 
-    if metrics["brightness"] < 80:
-        return "Increase lighting"
+    Nemotron focuses on higher-level semantic composition issues:
+    - Pose orientation
+    - Occlusion
+    - Camera height
+    - Background distractions
+    - Subject gaze direction
+    """
 
-    if metrics["sharpness"] < 150:
-        return "Hold still"
-
-    return "Adjust slightly"
-
-
-def nemotron_guidance(frame, metrics):
     api_key = os.getenv(API_KEY_ENV)
     if not api_key:
-        return fallback_guidance(metrics)
+        return ""  # Safe fallback if key missing
 
     image_b64 = encode_frame_to_base64(frame)
 
     system_prompt = (
-        "You are a smart camera assistant. "
-        "Return only ONE short instruction (max 4 words). "
-        "No explanations."
+        "You are an AI photography co-pilot assisting a professional photographer. "
+        "Return only ONE short instruction (max 5 words). "
+        "No explanations. If no issue detected, return 'OK'."
     )
 
-    user_prompt = f"""
-Observations:
-Brightness: {metrics['brightness']:.1f}
-Sharpness: {metrics['sharpness']:.1f}
-Face detected: {metrics['face_detected']}
-Face centered: {metrics['face_centered']}
-Score: {metrics['quality_score']}/100
+    user_prompt = """
+You are assisting a professional photographer.
 
-Return ONE short instruction like:
-Move left
-Move right
-Hold still
-Remove object
-Look at camera
-Smile
-Perfect - capturing
+Analyze the image and detect higher-level composition issues that CV metrics may miss:
+
+- Subject turned too far sideways
+- Face partially occluded (hands, objects, mask)
+- Distracting object in foreground
+- Camera angle too low or too high
+- Poor head positioning
+- Background distraction
+- Subject looking away from camera
+- Framing imbalance
+
+Return ONE short instruction (max 5 words) directed to the photographer.
+
+Examples:
+Ask subject to turn slightly
+Remove foreground object
+Raise camera angle
+Lower camera slightly
+Reduce background distraction
+Ask subject to face forward
+OK
 """
 
     payload = {
@@ -78,7 +88,7 @@ Perfect - capturing
                 ],
             },
         ],
-        "max_tokens": 20,
+        "max_tokens": 30,
         "temperature": 0.2,
     }
 
@@ -96,84 +106,14 @@ Perfect - capturing
         )
         response.raise_for_status()
         result = response.json()
-        return result["choices"][0]["message"]["content"].strip()
 
-    except Exception:
-        return fallback_guidance(metrics)
-
-def nemotron_refinement(frame, metrics):
-    """
-    High-level refinement layer:
-    - detects occlusion (hands/objects/mask)
-    - suggests simple actions beyond CV thresholds
-    Returns ONE short instruction (max 5 words).
-    """
-    api_key = os.getenv(API_KEY_ENV)
-    if not api_key:
-        return ""  # no refinement if no key
-
-    image_b64 = encode_frame_to_base64(frame)
-
-    system_prompt = (
-        "You are a smart camera assistant. "
-        "Return only ONE short refinement instruction (max 5 words). "
-        "No explanations. If nothing is wrong, return 'OK'."
-    )
-
-    user_prompt = f"""
-We already compute brightness/sharpness/centering.
-Your job is to detect semantic problems from the image:
-- hand/finger occlusion
-- object blocking face
-- mask/face covered
-- extreme profile view
-- distracting obstruction in front of camera
-
-Return ONE short instruction (max 5 words).
-Examples:
-Remove object
-Uncover your face
-Clean the lens
-Lower the camera
-Step back slightly
-OK
-"""
-
-    payload = {
-        "model": NEMOTRON_MODEL,
-        "messages": [
-            {"role": "system", "content": system_prompt},
-            {
-                "role": "user",
-                "content": [
-                    {"type": "text", "text": user_prompt},
-                    {
-                        "type": "image_url",
-                        "image_url": {"url": f"data:image/jpeg;base64,{image_b64}"},
-                    },
-                ],
-            },
-        ],
-        "max_tokens": 20,
-        "temperature": 0.2,
-    }
-
-    headers = {
-        "Authorization": f"Bearer {api_key}",
-        "Content-Type": "application/json",
-    }
-
-    try:
-        response = requests.post(
-            NEMOTRON_API_URL,
-            headers=headers,
-            json=payload,
-            timeout=API_TIMEOUT_SECONDS,
-        )
-        response.raise_for_status()
-        result = response.json()
         text = result["choices"][0]["message"]["content"].strip()
-        return "" if text.upper() == "OK" else text
-    except Exception:
-        return ""
 
+        # Only return meaningful refinement
+        if text.upper() == "OK":
+            return ""
+        return text
+
+    except Exception:
+        # Silent fallback for smooth UX
+        return ""

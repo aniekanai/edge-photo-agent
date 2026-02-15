@@ -2,7 +2,9 @@ import requests
 import base64
 import cv2
 import os
+import threading
 
+# NVIDIA Nemotron API Configuration
 NEMOTRON_API_URL = "https://integrate.api.nvidia.com/v1/chat/completions"
 NEMOTRON_MODEL = "nvidia/nemotron-nano-12b-v2-vl"
 API_KEY_ENV = "NVIDIA_API_KEY"
@@ -14,33 +16,34 @@ def encode_frame_to_base64(frame):
     return base64.b64encode(buffer).decode("utf-8")
 
 
+# ---------------------------
+# LOCAL FAST CV BRAIN
+# ---------------------------
 def local_guidance(metrics):
     """
-    Fast local CV-based guidance (Primary brain).
-    No API calls here.
+    Instant guidance. This runs every frame.
+    NO internet.
     """
 
     if not metrics["face_detected"]:
-        return "Center Yourself"
+        return "Center subject"
 
     if not metrics["face_centered"]:
-        return "Move to Center"
+        return "Move to center"
 
     if metrics["brightness"] < 80:
-        return "Increase Lighting"
+        return "Increase lighting"
 
-    if metrics["sharpness"] <= 350:
-        return "Hold Still"
+    if metrics["sharpness"] < 400:
+        return "Hold camera steady"
 
     return "READY"
 
 
+# ---------------------------
+# NEMOTRON REFINEMENT
+# ---------------------------
 def nemotron_refinement(frame, metrics):
-    """
-    Professional photography refinement layer.
-    Only runs when local CV says READY.
-    """
-
     api_key = os.getenv(API_KEY_ENV)
     if not api_key:
         return ""
@@ -48,31 +51,24 @@ def nemotron_refinement(frame, metrics):
     image_b64 = encode_frame_to_base64(frame)
 
     system_prompt = (
-        "You are an AI photography co-pilot assisting a professional photographer. "
-        "Return only ONE short instruction (max 5 words). "
-        "No explanations. If no issue detected, return 'OK'."
+        "You are an AI photography co-pilot assisting a photographer. "
+        "Return ONE short instruction (max 5 words). "
+        "If no problem exists, return OK."
     )
 
     user_prompt = """
-You are assisting a professional photographer.
+Look for high-level composition issues:
+- subject looking away
+- head turned sideways
+- obstruction in front
+- poor camera angle
+- distracting background
 
-Analyze the image and detect higher-level composition issues:
-
-- Subject turned too far sideways
-- Face partially occluded
-- Distracting object in foreground
-- Camera angle too low or too high
-- Subject looking away from camera
-- Background distraction
-
-Return ONE short instruction (max 5 words).
-
+Return ONE short instruction.
 Examples:
-Ask subject to turn slightly
+Ask subject face forward
+Raise camera slightly
 Remove foreground object
-Raise camera angle
-Lower camera slightly
-Ask subject to face forward
 OK
 """
 
@@ -93,7 +89,7 @@ OK
                 ],
             },
         ],
-        "max_tokens": 30,
+        "max_tokens": 25,
         "temperature": 0.2,
     }
 
@@ -111,12 +107,36 @@ OK
         )
         response.raise_for_status()
         result = response.json()
-
         text = result["choices"][0]["message"]["content"].strip()
 
         if text.upper() == "OK":
             return ""
+
         return text
 
     except Exception:
         return ""
+
+
+# ---------------------------
+# BACKGROUND THREAD SYSTEM
+# ---------------------------
+
+latest_refinement = ""
+refinement_lock = threading.Lock()
+
+
+def start_nemotron_background(frame, metrics):
+    def worker():
+        global latest_refinement
+        result = nemotron_refinement(frame, metrics)
+        with refinement_lock:
+            latest_refinement = result
+
+    thread = threading.Thread(target=worker, daemon=True)
+    thread.start()
+
+
+def get_latest_refinement():
+    with refinement_lock:
+        return latest_refinement

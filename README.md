@@ -28,9 +28,9 @@ The photographer remains in control — the AI acts as an assistant.
 ## Example Results
 Photos captured using the AI co-pilot:
 
-![Result](demo/captures/capture_20260215_131033.jpg)
-![Result](demo/captures/capture_20260215_131035.jpg)
-![Result](demo/captures/capture_20260215_131400.jpg)
+![Result](demo/captures/capture_20260215_131618.jpg))
+![Result](demo/captures/capture_20260215_132000.jpg)
+![Result](demo/captures/capture_20260215_132006.jpg)
 
 ---
 

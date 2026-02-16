@@ -7,10 +7,8 @@ Instead of fixing photos in editing, the AI helps improve the photo **before the
 ---
 
 ## 🎥 Live Demo
-Watch the co-pilot guiding a photographer in real time:
 
-▶ https://youtube.com/shorts/iMxgTugIAjQ?feature=share
-
+[![Watch the AI Photography Co-Pilot Demo](https://img.youtube.com/vi/iMxgTugIAjQ/maxresdefault.jpg)](https://youtu.be/iMxgTugIAjQ)
 ---
 
 ## What the System Does
